@@ -9,6 +9,30 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from matlab import *
 import numpy as np
+import re
+
+def preprocess_matlab_syntax(command):
+    """
+    Preprocess MATLAB-style syntax to Python syntax
+    
+    - Convert ' (transpose) to .T
+    - Convert [1,2,3] to np.array([1,2,3])
+    """
+    # Handle transpose operator: convert a' to a.T
+    # Use regex to find variable names followed by '
+    command = re.sub(r'(\w+)\'', r'\1.T', command)
+    
+    # Convert matrix/vector literals to numpy arrays
+    # Match [...] patterns and wrap them with np.array()
+    def replace_brackets(match):
+        content = match.group(1)
+        return f'np.array([{content}])'
+    
+    # Only convert brackets that look like matrix literals (not function calls)
+    # Match [...] that are not preceded by a letter/underscore (to avoid matching func[...])
+    command = re.sub(r'(?<![a-zA-Z_])\[([^\[\]]+)\]', replace_brackets, command)
+    
+    return command
 
 def main():
     print("=" * 60)
@@ -77,12 +101,19 @@ def main():
             
             # Execute command
             try:
+                # Preprocess MATLAB-style syntax
+                processed_command = preprocess_matlab_syntax(command)
+                
                 # Include both matlab functions and local variables in global namespace
                 namespace = globals().copy()
                 namespace.update(local_vars)
                 
                 # Execute
-                result = eval(command, namespace, local_vars)
+                result = eval(processed_command, namespace, local_vars)
+                
+                # Convert lists to numpy arrays if needed
+                if isinstance(result, list):
+                    result = np.array(result)
                 
                 # Display result
                 if result is not None:
@@ -97,9 +128,15 @@ def main():
             except SyntaxError:
                 # If eval fails, try exec (for assignments, etc.)
                 try:
+                    processed_command = preprocess_matlab_syntax(command)
                     namespace = globals().copy()
                     namespace.update(local_vars)
-                    exec(command, namespace, local_vars)
+                    exec(processed_command, namespace, local_vars)
+                    
+                    # Convert any newly created list variables to numpy arrays
+                    for key, value in local_vars.items():
+                        if isinstance(value, list):
+                            local_vars[key] = np.array(value)
                 except Exception as e:
                     print(f"Error: {e}")
             except Exception as e:
